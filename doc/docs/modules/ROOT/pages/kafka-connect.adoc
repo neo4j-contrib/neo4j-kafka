@@ -16,13 +16,12 @@ Kafka Connect, an open source component of Apache Kafka, is a framework for conn
 The Neo4j Streams project provides a Kafka Connect plugin that can be installed into the Confluent Platform enabling:
 
 - Ingest data from Kafka topics directly into Neo4j via templated Cypher queries;
-- Stream Neo4j transaction events (*coming soon*).
+- Stream Neo4j queries.
 
 [#kafka_connect_plugin_install]
 == Plugin installation
 
 You can choose your preferred way in order to install the plugin
-
 
 === Download and install the plugin via Confluent Hub client
 
@@ -78,6 +77,67 @@ Build the project by running the following command:
 
 Inside the directory `<neo4j-streams>/kafka-connect-neo4j/target/component/packages` you'll find a file named `neo4j-kafka-connect-neo4j-<VERSION>.zip`, please unpackage and place it into your Kafka Connect `plugins` dir.
 
+[#kafka-connect-source-instance]
+== Create the Source Instance
+
+In this chapter we'll discuss about how the Source instance works
+
+You can create a new Source instance with this REST call:
+
+[source,shell]
+----
+curl -X POST http://localhost:8083/connectors \
+  -H 'Content-Type:application/json' \
+  -H 'Accept:application/json' \
+  -d @contrib.source.avro.neo4j.json
+----
+
+Let's look at the `contrib.source.avro.neo4j.json` file:
+
+[source,json]
+----
+include::ROOT:partial$docker-data/contrib.source.avro.neo4j.json[]
+----
+
+This will create a Kafka Connect Source instance that will send `AVRO` message over the topic named `my-topic`. Every message in the
+topic will have the following structure:
+
+[source,json]
+----
+{"name": <name>, "timestamp": <timestamp>}
+----
+
+**Nb.** Please check the <<kafka-connect-configuration-summary>> for a detailed guide about the supported configuration
+parameters
+
+=== How the Source module pushes the data to the defined Kafka topic
+
+We use the query provided in the `neo4j.source.query` field by polling the database every value is into the
+`neo4j.streaming.poll.interval.msecs` field.
+
+So given the JSON configuration we have that we'll perform:
+
+[source,cypher]
+----
+MATCH (ts:TestSource) WHERE ts.timestamp > $lastCheck RETURN ts.name AS name, ts.timestamp AS timestamp
+----
+
+every 5000 milliseconds by publishing events like:
+
+[source,json]
+----
+{"name":{"string":"John Doe"},"timestamp":{"long":1624551349362}}
+----
+
+In this case we use `neo4j.enforce.schema=true` and this means that we will attach a schema for each record, in case
+you want to stream pure simple JSON strings just use the relative serializer with `neo4j.enforce.schema=false` with the
+following output:
+
+[source,json]
+----
+{"name": "John Doe", "timestamp": 1624549598834}
+----
+
 [#kafka-connect-sink-instance]
 == Create the Sink Instance
 
@@ -117,13 +177,13 @@ Under the hood the Sink inject the event object in this way
 
 [source,cypher]
 ----
-UNWIND {batch} AS event
+UNWIND $batch AS event
 MERGE (p:Person{name: event.name, surname: event.surname})
 MERGE (f:Family{name: event.surname})
 MERGE (p)-[:BELONGS_TO]->(f)
 ----
 
-Where `\{batch\}` is a list of event objects.
+Where `$batch` is a list of event objects.
 
 You can change the query or remove the property and add your own, but you must follow the following convention:
 
@@ -291,11 +351,12 @@ image::ROOT:confluent-imported-data.png[title="Confluent Platform Management", a
 
 include::config-override-policy.adoc[]
 
+[#kafka-connect-configuration-summary]
 == Configuration Summary
 
 Following a summary of all the configuration parameters you can use for the Kafka Connect plugin:
 
-.Kafka Connect configuration parameters
+.Kafka Connect Common configuration parameters (shared between Source and Sink)
 [%width="100%",cols="m,m,m,a", opts=header]
 |===
 | Name
@@ -303,7 +364,6 @@ Following a summary of all the configuration parameters you can use for the Kafk
 | Mandatory
 | Note
 
-| topics | <topicA,topicB> | true | A list of comma-separated topics
 | connector.class | streams.kafka.connect.sink.Neo4jSinkConnector | true |
 | key.converter | org.apache.kafka.connect.storage.StringConverter | false | Converter class for key Connect data
 | value.converter | org.apache.kafka.connect.json.JsonConverter | false | Converter class for value Connect data
@@ -311,15 +371,6 @@ Following a summary of all the configuration parameters you can use for the Kafk
 | value.converter.schemas.enable | true/false | false | If true the value will be treated as a composite JSON object containing schema and the data. Default value is false
 | key.converter.schema.registry.url | \http://localhost:8081 | false | The Schema Registry URL has to be provide only when you decide to use AvroConverter
 | value.converter.schema.registry.url | \http://localhost:8081 | false | The Schema Registry URL has to be provide only when you decide to use AvroConverter
-| kafka.bootstrap.servers | <localhost:9092> | false | The Broker URI is mandatory only when if you have configured DLQ
-| kafka.<any_other_kafka_property | | false |
-| errors.tolerance | all/none | false | all == lenient, silently ignore bad messages. none (default) means that any error will result in a connector failure
-| errors.log.enable | false/true | false | log errors (default: false)
-| errors.log.include.messages | false/true | false | log bad messages too (default: false)
-| errors.deadletterqueue.topic.name | topic-name | false | dead letter queue topic name, if left off no DLQ, default: not set
-| errors.deadletterqueue.context.headers.enable | false/true | false | enrich messages with metadata headers like exception, timestamp, org. topic, org.part, default:false
-| errors.deadletterqueue.context.headers.prefix | prefix-text | false | common prefix for header entries, e.g. `"__streams.errors."` , default: not set
-| errors.deadletterqueue.topic.replication.factor | 3/1 | false | replication factor, need to set to 1 for single partition, default:3
 | neo4j.database | "bolt://neo4j:7687" | true | Specify a database name only if you want to use a non-default database. Default value is 'neo4j'
 | neo4j.server.uri | "bolt://neo4j:7687" | true | Neo4j Server URI
 | neo4j.authentication.basic.username | your_neo4j_user | true | Neo4j username
@@ -329,7 +380,6 @@ Following a summary of all the configuration parameters you can use for the Kafk
 | neo4j.authentication.type | NONE/BASIC/KERBEROS | false | The authentication type (default: 'BASIC')
 | neo4j.batch.size | Integer | false | The max number of events processed by the Cypher query (default: 1000)
 | neo4j.batch.timeout.msecs | Integer | false | The execution timeout for the cypher query (default: 0, that is without timeout)
-| neo4j.batch.parallelize | boolean | false | If enabled messages are processed concurrently in the sink. Non concurrent execution supports in-order processing, e.g. for CDC
 | neo4j.connection.max.lifetime.msecs | Long | false | The max Neo4j connection lifetime (default: 1 hour)
 | neo4j.connection.acquisition.timeout.msecs | Long | false | The max Neo4j acquisition timeout (default 1 hour)
 | neo4j.connection.liveness.check.timeout.msecs | Long | false | The max Neo4j liveness check timeout (default 1 hour)
@@ -339,6 +389,27 @@ Following a summary of all the configuration parameters you can use for the Kafk
 | neo4j.encryption.trust.strategy | TRUST_ALL_CERTIFICATES/TRUST_CUSTOM_CA_SIGNED_CERTIFICATES/TRUST_SYSTEM_CA_SIGNED_CERTIFICATES | false | The Neo4j trust strategy (default: TRUST_ALL_CERTIFICATES)
 | neo4j.retry.backoff.msecs | Long | false | The time in milliseconds to wait following a transient error before a retry attempt is made (default: 30000).
 | neo4j.retry.max.attemps | Long | false | The maximum number of times to retry on transient errors (except for TimeoutException) before failing the task (default: 5).
+|===
+
+.Kafka Connect Sink configuration parameters
+[%width="100%",cols="m,m,m,a", opts=header]
+|===
+| Name
+| Value
+| Mandatory
+| Note
+
+| topics | <topicA,topicB> | true | A list of comma-separated topics
+| kafka.bootstrap.servers | <localhost:9092> | false | The Broker URI is mandatory only when if you have configured DLQ
+| kafka.<any_other_kafka_property> | | false |
+| errors.tolerance | all/none | false | all == lenient, silently ignore bad messages. none (default) means that any error will result in a connector failure
+| errors.log.enable | false/true | false | log errors (default: false)
+| errors.log.include.messages | false/true | false | log bad messages too (default: false)
+| errors.deadletterqueue.topic.name | topic-name | false | dead letter queue topic name, if left off no DLQ, default: not set
+| errors.deadletterqueue.context.headers.enable | false/true | false | enrich messages with metadata headers like exception, timestamp, org. topic, org.part, default:false
+| errors.deadletterqueue.context.headers.prefix | prefix-text | false | common prefix for header entries, e.g. `"__streams.errors."` , default: not set
+| errors.deadletterqueue.topic.replication.factor | 3/1 | false | replication factor, need to set to 1 for single partition, default:3
+| neo4j.batch.parallelize | boolean | false | If enabled messages are processed concurrently in the sink. Non concurrent execution supports in-order processing, e.g. for CDC
 | neo4j.topic.cdc.sourceId | <list of topics separated by semicolon> | false |
 | neo4j.topic.cdc.sourceId.labelName | <the label attached to the node> | false | default value is *SourceEvent*
 | neo4j.topic.cdc.sourceId.idName | <the id name given to the CDC id field> | false | default value is *sourceId*
@@ -346,6 +417,28 @@ Following a summary of all the configuration parameters you can use for the Kafk
 | neo4j.topic.pattern.node.<TOPIC_NAME> | <node extraction pattern> | false |
 | neo4j.topic.pattern.relationship.<TOPIC_NAME> | <relationship extraction pattern> | false |
 | neo4j.topic.cud | <list of topics separated by semicolon> | false |
+| neo4j.topic.cypher.<topic> | <valid Cypher query> | false |
+|===
+
+.Kafka Connect Source configuration parameters
+[%width="100%",cols="m,m,m,a", opts=header]
+|===
+| Name
+| Value
+| Mandatory
+| Note
+
+| topic | <topic> | true | The topic where the Source will publish the data
+| partitions | <parition> | false | The number of partition for the Source (default 1)
+| neo4j.streaming.from | enum[ALL, NOW, LAST_COMMITTED] | false | When start the Source. ALL means from the beginning.
+LAST_COMMITTED will try to retrieve already committed offset, in case it will not find one LAST_COMMITTED use NOW as fallback (default NOW)
+| neo4j.source.type | enum[QUERY] | false | The type of the Source strategy, with QUERY you must set `neo4j.source.query`
+| neo4j.source.query | <valid cypher query> | false | The Cypher query in order to extract the data from Neo4j you need to define it if you use `neo4j.source.type=QUERY`
+| neo4j.streaming.property | <property> | false | The name of the property that we need to consider in order to determinate the last queried record;
+if not defined we use an internal value given from the last performed check.
+We use this value for injecting it in the provided query defined in `neo4j.source.query` as `$lastChek` parameter
+| neo4j.streaming.poll.interval.msecs | <millis> | Int | The polling interval in ms (Default: 10000)
+| neo4j.enforce.schema | <true/false> | false | Apply a schema to each record (Default: false)
 |===
 
 [NOTE]

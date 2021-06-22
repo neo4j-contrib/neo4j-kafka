@@ -12,6 +12,7 @@ import org.mockito.Mockito.mock
 import org.neo4j.driver.*
 import org.neo4j.driver.exceptions.ClientException
 import streams.events.*
+import streams.kafka.connect.common.Neo4jConnectorConfig
 import streams.service.sink.strategy.CUDNode
 import streams.service.sink.strategy.CUDOperations
 import streams.utils.JSONUtils
@@ -53,10 +54,10 @@ class Neo4jSinkTaskAuraTest {
         }
 
         fun getMapSinkConnectorConfig() = mutableMapOf(
-                Neo4jSinkConnectorConfig.AUTHENTICATION_BASIC_USERNAME to user!!,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_BASIC_PASSWORD to password!!,
-                Neo4jSinkConnectorConfig.SERVER_URI to uri!!,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.BASIC.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_BASIC_USERNAME to user!!,
+                Neo4jConnectorConfig.AUTHENTICATION_BASIC_PASSWORD to password!!,
+                Neo4jConnectorConfig.SERVER_URI to uri!!,
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.BASIC.toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SOURCE_ID_LABEL_NAME to LABEL_SINK_AURA,
         )
 
@@ -78,7 +79,7 @@ class Neo4jSinkTaskAuraTest {
         driver?.session().use { countEntitiesSinkAura(it, 0) }
         val props = getMapSinkConnectorConfig()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$NAME_TOPIC"] = " CREATE (b:$LABEL_SINK_AURA)"
-        props[Neo4jSinkConnectorConfig.BATCH_SIZE] = 2.toString()
+        props[Neo4jConnectorConfig.BATCH_SIZE] = 2.toString()
         props[SinkTask.TOPICS_CONFIG] = NAME_TOPIC
 
         val task = Neo4jSinkTask()

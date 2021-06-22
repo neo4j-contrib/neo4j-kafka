@@ -8,9 +8,10 @@ import org.apache.avro.generic.IndexedRecord
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.neo4j.driver.types.Relationship
 import org.neo4j.graphdb.Node
-import streams.utils.JSONUtils
 import streams.service.StreamsSinkEntity
+import streams.utils.JSONUtils
 import java.nio.ByteBuffer
 import java.util.*
 import javax.lang.model.SourceVersion
@@ -24,6 +25,22 @@ fun Map<*, *>.asProperties() = this.let {
 
 fun Node.labelNames() : List<String> {
     return this.labels.map { it.name() }
+}
+
+fun org.neo4j.driver.types.Node.asStreamsMap(): Map<String, Any?> {
+    val nodeMap = this.asMap().toMutableMap()
+    nodeMap["<id>"] = this.id()
+    nodeMap["<labels>"] = this.labels()
+    return nodeMap
+}
+
+fun Relationship.asStreamsMap(): Map<String, Any?> {
+    val relMap = this.asMap().toMutableMap()
+    relMap["<id>"] = this.id()
+    relMap["<type>"] = this.type()
+    relMap["<source.id>"] = this.startNodeId()
+    relMap["<target.id>"] = this.endNodeId()
+    return relMap
 }
 
 fun String.toPointCase(): String {

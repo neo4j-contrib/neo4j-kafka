@@ -2,7 +2,7 @@
 version: '2'
 services:
   neo4j:
-    image: neo4j:4.0.3
+    image: neo4j:4.3-enterprise
     hostname: neo4j
     container_name: neo4j
     ports:
@@ -12,6 +12,7 @@ services:
       NEO4J_kafka_bootstrap_servers: broker:9093
       NEO4J_AUTH: neo4j/connect
       NEO4J_dbms_memory_heap_max__size: 8G
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
 
   zookeeper:
     image: confluentinc/cp-zookeeper

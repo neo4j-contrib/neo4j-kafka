@@ -59,6 +59,13 @@
         </dependency>
 
         <dependency>
+            <groupId>org.neo4j</groupId>
+            <artifactId>neo4j-streams-test-support</artifactId>
+            <version>${project.parent.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.neo4j.driver</groupId>
             <artifactId>neo4j-java-driver</artifactId>
         </dependency>
@@ -103,6 +110,7 @@
                             </fileSets>
                             <componentTypes>
                                 <componentType>sink</componentType>
+                                <componentType>source</componentType>
                             </componentTypes>
                             <ownerUsername>neo4j</ownerUsername>
                             <ownerType>organization</ownerType>
@@ -110,7 +118,7 @@
                             <ownerUrl>https://neo4j.com/</ownerUrl>
                             <title>Kafka Connect Neo4j Sink</title>
                             <documentationUrl>https://neo4j-contrib.github.io/neo4j-streams/#_kafka_connect</documentationUrl>
-                            <description>It's a basic Apache Kafka Connect SinkConnector which allows moving data from Kafka topics into Neo4j via Cypher templated queries.</description>
+                            <description>It's a basic Apache Kafka Connect Connector which allows moving data from Kafka topics into Neo4j via Cypher templated queries ad vice versa.</description>
                             <logo>assets/neo4j-logo.png</logo>
                             <supportSummary><![CDATA[Support through <a href="https://neo4j.com/labs/">Neo4j Labs</a>]]></supportSummary>
                             <sourceUrl>https://github.com/neo4j-contrib/neo4j-streams/tree/master/kafka-connect-neo4j</sourceUrl>

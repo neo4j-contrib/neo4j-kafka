@@ -12,6 +12,7 @@ import org.neo4j.driver.internal.value.PointValue
 import org.neo4j.graphdb.spatial.Point
 import org.neo4j.values.storable.CoordinateReferenceSystem
 import streams.events.*
+import streams.extensions.asStreamsMap
 import java.io.IOException
 import java.time.temporal.TemporalAccessor
 import kotlin.reflect.full.isSubclassOf
@@ -43,9 +44,31 @@ fun PointValue.toStreamsPoint(): StreamsPoint {
     }
 }
 
+fun org.neo4j.driver.types.Point.toStreamsPoint(): StreamsPoint {
+    val point = this
+    return when (val crsType = point.srid()) {
+        CoordinateReferenceSystem.Cartesian.code -> StreamsPointCartesian(CoordinateReferenceSystem.Cartesian.name, point.x(), point.y())
+        CoordinateReferenceSystem.Cartesian_3D.code -> StreamsPointCartesian(CoordinateReferenceSystem.Cartesian_3D.name, point.x(), point.y(), point.z())
+        CoordinateReferenceSystem.WGS84.code -> StreamsPointWgs(CoordinateReferenceSystem.WGS84.name, point.x(), point.y())
+        CoordinateReferenceSystem.WGS84_3D.code -> StreamsPointWgs(CoordinateReferenceSystem.WGS84_3D.name, point.x(), point.y(), point.z())
+        else -> throw IllegalArgumentException("Point type $crsType not supported")
+    }
+}
+
 class PointSerializer : JsonSerializer<Point>() {
     @Throws(IOException::class, JsonProcessingException::class)
     override fun serialize(value: Point?, jgen: JsonGenerator,
+                           provider: SerializerProvider) {
+        if (value == null) {
+            return
+        }
+        jgen.writeObject(value.toStreamsPoint())
+    }
+}
+
+class DriverPointSerializer : JsonSerializer<org.neo4j.driver.types.Point>() {
+    @Throws(IOException::class, JsonProcessingException::class)
+    override fun serialize(value: org.neo4j.driver.types.Point?, jgen: JsonGenerator,
                            provider: SerializerProvider) {
         if (value == null) {
             return
@@ -76,6 +99,27 @@ class TemporalAccessorSerializer : JsonSerializer<TemporalAccessor>() {
     }
 }
 
+class DriverNodeSerializer : JsonSerializer<org.neo4j.driver.types.Node>() {
+    @Throws(IOException::class, JsonProcessingException::class)
+    override fun serialize(value: org.neo4j.driver.types.Node?, jgen: JsonGenerator,
+                           provider: SerializerProvider) {
+        if (value == null) {
+            return
+        }
+        jgen.writeObject(value.asStreamsMap())
+    }
+}
+
+class DriverRelationshipSerializer : JsonSerializer<org.neo4j.driver.types.Relationship>() {
+    @Throws(IOException::class, JsonProcessingException::class)
+    override fun serialize(value: org.neo4j.driver.types.Relationship?, jgen: JsonGenerator,
+                           provider: SerializerProvider) {
+        if (value == null) {
+            return
+        }
+        jgen.writeObject(value.asStreamsMap())
+    }
+}
 
 object JSONUtils {
 
@@ -86,6 +130,9 @@ object JSONUtils {
         val module = SimpleModule("Neo4jKafkaSerializer")
         StreamsUtils.ignoreExceptions({ module.addSerializer(Point::class.java, PointSerializer()) }, NoClassDefFoundError::class.java) // in case is loaded from
         StreamsUtils.ignoreExceptions({ module.addSerializer(PointValue::class.java, PointValueSerializer()) }, NoClassDefFoundError::class.java) // in case is loaded from
+        StreamsUtils.ignoreExceptions({ module.addSerializer(org.neo4j.driver.types.Point::class.java, DriverPointSerializer()) }, NoClassDefFoundError::class.java) // in case is loaded from
+        StreamsUtils.ignoreExceptions({ module.addSerializer(org.neo4j.driver.types.Node::class.java, DriverNodeSerializer()) }, NoClassDefFoundError::class.java) // in case is loaded from
+        StreamsUtils.ignoreExceptions({ module.addSerializer(org.neo4j.driver.types.Relationship::class.java, DriverRelationshipSerializer()) }, NoClassDefFoundError::class.java) // in case is loaded from
         module.addSerializer(TemporalAccessor::class.java, TemporalAccessorSerializer())
         OBJECT_MAPPER.registerModule(module)
         OBJECT_MAPPER.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS)

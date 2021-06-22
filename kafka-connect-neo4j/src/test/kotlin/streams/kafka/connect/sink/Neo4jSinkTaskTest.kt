@@ -8,6 +8,7 @@ import org.apache.kafka.connect.sink.SinkRecord
 import org.apache.kafka.connect.sink.SinkTask
 import org.apache.kafka.connect.sink.SinkTaskContext
 import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.mockito.Mockito.mock
@@ -16,6 +17,7 @@ import org.neo4j.graphdb.Label
 import org.neo4j.graphdb.Node
 import org.neo4j.harness.junit.rule.Neo4jRule
 import streams.events.*
+import streams.kafka.connect.common.Neo4jConnectorConfig
 import streams.utils.JSONUtils
 import streams.service.errors.ErrorService
 import streams.service.errors.ProcessingError
@@ -39,10 +41,23 @@ class Neo4jSinkTaskTest {
             .withDisabledServer()
             .withConfig(GraphDatabaseSettings.auth_enabled, false)
 
+    private lateinit var task: SinkTask
+
     @After
     fun after() {
-        cleanAll()
+        db.defaultDatabaseService().beginTx().use {
+            it.execute("MATCH (n) DETACH DELETE n")
+            it.commit()
+        }
+        task.stop()
     }
+
+    @Before
+    fun before() {
+        task = Neo4jSinkTask()
+        task.initialize(mock(SinkTaskContext::class.java))
+    }
+
 
     private val PERSON_SCHEMA = SchemaBuilder.struct().name("com.example.Person")
             .field("firstName", Schema.STRING_SCHEMA)
@@ -67,7 +82,7 @@ class Neo4jSinkTaskTest {
     fun `test array of struct`() {
         val firstTopic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$firstTopic"] = """
             CREATE (b:BODY)
             WITH event.p AS paragraphList, event.ul AS ulList, b
@@ -81,12 +96,10 @@ class Neo4jSinkTaskTest {
             UNWIND ulElem.value AS liElem
             CREATE (ul)-[:HAS_LI]->(li:LI{value: liElem.value, class: liElem.class})
         """.trimIndent()
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
-        props[Neo4jSinkConnectorConfig.BATCH_SIZE] = 2.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.BATCH_SIZE] = 2.toString()
         props[SinkTask.TOPICS_CONFIG] = firstTopic
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, PERSON_SCHEMA, Neo4jValueConverterTest.getTreeStruct(), 42))
         task.put(input)
@@ -109,11 +122,11 @@ class Neo4jSinkTaskTest {
         val firstTopic = "neotopic"
         val secondTopic = "foo"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$firstTopic"] = "CREATE (n:PersonExt {name: event.firstName, surname: event.lastName})"
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$secondTopic"] = "CREATE (n:Person {name: event.firstName})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
-        props[Neo4jSinkConnectorConfig.BATCH_SIZE] = 2.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.BATCH_SIZE] = 2.toString()
         props[SinkTask.TOPICS_CONFIG] = "$firstTopic,$secondTopic"
 
         val struct= Struct(PERSON_SCHEMA)
@@ -128,8 +141,6 @@ class Neo4jSinkTaskTest {
                 .put("age", 21)
                 .put("modified", Date(1474661402123L))
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, PERSON_SCHEMA, struct, 42),
                 SinkRecord(firstTopic, 1, null, null, PERSON_SCHEMA, struct, 42),
@@ -151,9 +162,9 @@ class Neo4jSinkTaskTest {
     @Test
     fun `should insert data into Neo4j from CDC events`() {
         val firstTopic = "neotopic"
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SOURCE_ID to firstTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to firstTopic)
 
         val cdcDataStart = StreamsTransactionEvent(meta = Meta(timestamp = System.currentTimeMillis(),
@@ -200,8 +211,6 @@ class Neo4jSinkTaskTest {
             schema = Schema()
         )
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, null, cdcDataStart, 42),
                 SinkRecord(firstTopic, 1, null, null, null, cdcDataEnd, 43),
@@ -234,9 +243,9 @@ class Neo4jSinkTaskTest {
             it.commit()
         }
         val firstTopic = "neotopic"
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SOURCE_ID to firstTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to firstTopic)
 
         val cdcDataStart = StreamsTransactionEvent(meta = Meta(timestamp = System.currentTimeMillis(),
@@ -272,8 +281,6 @@ class Neo4jSinkTaskTest {
             schema = Schema()
         )
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, null, cdcDataStart, 42),
                 SinkRecord(firstTopic, 1, null, null, null, cdcDataRelationship, 43))
@@ -297,9 +304,9 @@ class Neo4jSinkTaskTest {
     @Test
     fun `should insert data into Neo4j from CDC events with schema strategy`() {
         val firstTopic = "neotopic"
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SCHEMA to firstTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to firstTopic)
 
         val constraints = listOf(Constraint(label = "User", type = StreamsConstraintType.UNIQUE, properties = setOf("name", "surname")))
@@ -353,8 +360,6 @@ class Neo4jSinkTaskTest {
                 schema = relSchema
         )
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, null, cdcDataStart, 42),
                 SinkRecord(firstTopic, 1, null, null, null, cdcDataEnd, 43),
@@ -382,9 +387,9 @@ class Neo4jSinkTaskTest {
     @Test
     fun `should insert data into Neo4j from CDC events with schema strategy, multiple constraints and labels`() {
         val myTopic = UUID.randomUUID().toString()
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SCHEMA to myTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to myTopic)
 
         val constraintsCharacter = listOf(
@@ -447,8 +452,6 @@ class Neo4jSinkTaskTest {
                 schema = relSchema
         )
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(myTopic, 1, null, null, null, cdcDataStart, 42),
                 SinkRecord(myTopic, 1, null, null, null, cdcDataEnd, 43),
@@ -520,9 +523,9 @@ class Neo4jSinkTaskTest {
     @Test
     fun `should insert data into Neo4j from CDC events with schema strategy and multiple unique constraints merging previous nodes`() {
         val myTopic = UUID.randomUUID().toString()
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SCHEMA to myTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to myTopic)
 
         val constraints = listOf(
@@ -581,8 +584,6 @@ class Neo4jSinkTaskTest {
                 schema = relSchema
         )
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(myTopic, 1, null, null, null, cdcDataStart, 42),
                 SinkRecord(myTopic, 1, null, null, null, cdcDataEnd, 43),
@@ -662,9 +663,9 @@ class Neo4jSinkTaskTest {
     @Test
     fun `should insert data into Neo4j from CDC events with schema strategy and multiple unique constraints`() {
         val myTopic = UUID.randomUUID().toString()
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SCHEMA to myTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to myTopic)
 
         val constraints = listOf(
@@ -766,9 +767,9 @@ class Neo4jSinkTaskTest {
             it.commit()
         }
         val firstTopic = "neotopic"
-        val props = mapOf(Neo4jSinkConnectorConfig.SERVER_URI to db.boltURI().toString(),
+        val props = mapOf(Neo4jConnectorConfig.SERVER_URI to db.boltURI().toString(),
                 Neo4jSinkConnectorConfig.TOPIC_CDC_SOURCE_ID to firstTopic,
-                Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
+                Neo4jConnectorConfig.AUTHENTICATION_TYPE to AuthenticationType.NONE.toString(),
                 SinkTask.TOPICS_CONFIG to firstTopic)
 
         val cdcDataStart = StreamsTransactionEvent(meta = Meta(timestamp = System.currentTimeMillis(),
@@ -785,8 +786,6 @@ class Neo4jSinkTaskTest {
             ),
             schema = Schema()
         )
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(firstTopic, 1, null, null, null, cdcDataStart, 42))
         task.put(input)
@@ -808,9 +807,9 @@ class Neo4jSinkTaskTest {
     fun `should not insert data into Neo4j`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$topic"] = "CREATE (n:Person {name: event.firstName, surname: event.lastName})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         val struct= Struct(PLACE_SCHEMA)
@@ -818,8 +817,6 @@ class Neo4jSinkTaskTest {
                 .put("latitude", 37.5629917.toFloat())
                 .put("longitude", -122.3255254.toFloat())
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(listOf(SinkRecord(topic, 1, null, null, PERSON_SCHEMA, struct, 42)))
         db.defaultDatabaseService().beginTx().use {
@@ -832,15 +829,13 @@ class Neo4jSinkTaskTest {
     fun `should report but not fail parsing data`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$topic"] = "CREATE (n:Person {name: event.firstName, surname: event.lastName})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
         props[ErrorService.ErrorConfig.TOLERANCE] = "all"
         props[ErrorService.ErrorConfig.LOG] = true.toString()
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(listOf(SinkRecord(topic, 1, null, null, null, "a", 42)))
         db.defaultDatabaseService().beginTx().use {
@@ -853,15 +848,13 @@ class Neo4jSinkTaskTest {
     fun `should report but not fail invalid schema`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$topic"] = "CREATE (n:Person {name: event.firstName, surname: event.lastName})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[ErrorService.ErrorConfig.TOLERANCE] = "all"
         props[ErrorService.ErrorConfig.LOG] = true.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(listOf(SinkRecord(topic, 1, null, 42, null, "true", 42)))
         db.defaultDatabaseService().beginTx().use {
@@ -874,15 +867,13 @@ class Neo4jSinkTaskTest {
     fun `should fail running invalid cypher`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$topic"] = " No Valid Cypher "
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
         props[ErrorService.ErrorConfig.TOLERANCE] = "all"
         props[ErrorService.ErrorConfig.LOG] = true.toString()
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(listOf(SinkRecord(topic, 1, null, 42, null, "{\"foo\":42}", 42)))
         db.defaultDatabaseService().beginTx().use {
@@ -895,16 +886,14 @@ class Neo4jSinkTaskTest {
     fun `should work with node pattern topic`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_PATTERN_NODE_PREFIX}$topic"] = "User{!userId,name,surname,address.city}"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         val data = mapOf("userId" to 1, "name" to "Andrea", "surname" to "Santurbano",
                 "address" to mapOf("city" to "Venice", "CAP" to "30100"))
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(topic, 1, null, null, null, data, 42))
         task.put(input)
@@ -923,16 +912,14 @@ class Neo4jSinkTaskTest {
     fun `should work with relationship pattern topic`() {
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_PATTERN_RELATIONSHIP_PREFIX}$topic"] = "(:User{!sourceId,sourceName,sourceSurname})-[:KNOWS]->(:User{!targetId,targetName,targetSurname})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         val data = mapOf("sourceId" to 1, "sourceName" to "Andrea", "sourceSurname" to "Santurbano",
                 "targetId" to 1, "targetName" to "Michael", "targetSurname" to "Hunger", "since" to 2014)
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(topic, 1, null, null, null, data, 42))
         task.put(input)
@@ -964,15 +951,13 @@ class Neo4jSinkTaskTest {
         assertEquals(1L, count)
         val topic = "neotopic"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_PATTERN_NODE_PREFIX}$topic"] = "User{!userId,name,surname,address.city}"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         val data = mapOf("userId" to 1)
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(topic, 1, null, data, null, null, 42))
         task.put(input)
@@ -1006,13 +991,11 @@ class Neo4jSinkTaskTest {
         val sinkRecordMerge = SinkRecord(topic, 1, null, null, null, JSONUtils.asMap(relMerge), 0L)
 
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props[Neo4jSinkConnectorConfig.TOPIC_CUD] = topic
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(listOf(sinkRecordMerge))
 
@@ -1057,14 +1040,12 @@ class Neo4jSinkTaskTest {
             SinkRecord(topic, 1, null, null, null, JSONUtils.asMap(cudNode), it.toLong())
         }
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props[Neo4jSinkConnectorConfig.TOPIC_CUD] = topic
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         // when
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(data)
 
@@ -1095,9 +1076,9 @@ class Neo4jSinkTaskTest {
             SinkRecord(topic, 1, null, null, null, JSONUtils.asMap(rel), it.toLong())
         }
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props[Neo4jSinkConnectorConfig.TOPIC_CUD] = topic
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
         db.defaultDatabaseService().beginTx().use {
             it.execute("""
@@ -1111,8 +1092,6 @@ class Neo4jSinkTaskTest {
         }
 
         // when
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(data)
 
@@ -1141,14 +1120,12 @@ class Neo4jSinkTaskTest {
             SinkRecord(topic, 1, null, null, null, JSONUtils.asMap(rel), it.toLong())
         }
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props[Neo4jSinkConnectorConfig.TOPIC_CUD] = topic
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         // when
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(data)
 
@@ -1258,14 +1235,12 @@ class Neo4jSinkTaskTest {
         }
 
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props[Neo4jSinkConnectorConfig.TOPIC_CUD] = topic
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
 
         // when
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         task.put(data)
         task.put(dataRel)
@@ -1291,17 +1266,15 @@ class Neo4jSinkTaskTest {
         val topic = UUID.randomUUID().toString()
 
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_PATTERN_RELATIONSHIP_PREFIX}$topic"] = "(:User{!sourceId,sourceName,sourceSurname})-[:KNOWS]->(:User{!targetId,targetName,targetSurname})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[SinkTask.TOPICS_CONFIG] = topic
-        props[Neo4jSinkConnectorConfig.DATABASE] = "notExistent"
+        props[Neo4jConnectorConfig.DATABASE] = "notExistent"
 
         val data = mapOf("sourceId" to 1, "sourceName" to "Andrea", "sourceSurname" to "Santurbano",
                 "targetId" to 1, "targetName" to "Michael", "targetSurname" to "Hunger", "since" to 2014)
 
-        val task = Neo4jSinkTask()
-        task.initialize(mock(SinkTaskContext::class.java))
         task.start(props)
         val input = listOf(SinkRecord(topic, 1, null, null, null, data, 42))
 
@@ -1314,7 +1287,7 @@ class Neo4jSinkTaskTest {
                     && errorData.exception!!.javaClass.name == "org.neo4j.driver.exceptions.FatalDiscoveryException")
         }
 
-        props[Neo4jSinkConnectorConfig.DATABASE] = "neo4j"
+        props[Neo4jConnectorConfig.DATABASE] = "neo4j"
         val taskNotValid = Neo4jSinkTask()
         taskNotValid.initialize(mock(SinkTaskContext::class.java))
         taskNotValid.start(props)
@@ -1337,13 +1310,13 @@ class Neo4jSinkTaskTest {
     fun `should stop the query and fails with small timeout and vice versa`() {
         val myTopic = "foo"
         val props = mutableMapOf<String, String>()
-        props[Neo4jSinkConnectorConfig.SERVER_URI] = db.boltURI().toString()
+        props[Neo4jConnectorConfig.SERVER_URI] = db.boltURI().toString()
         props["${Neo4jSinkConnectorConfig.TOPIC_CYPHER_PREFIX}$myTopic"] = "CREATE (n:Person {name: event.name})"
-        props[Neo4jSinkConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
+        props[Neo4jConnectorConfig.AUTHENTICATION_TYPE] = AuthenticationType.NONE.toString()
         props[Neo4jSinkConnectorConfig.BATCH_PARALLELIZE] = true.toString()
         val batchSize = 500000
-        props[Neo4jSinkConnectorConfig.BATCH_SIZE] = batchSize.toString()
-        props[Neo4jSinkConnectorConfig.BATCH_TIMEOUT_MSECS] = 1.toString()
+        props[Neo4jConnectorConfig.BATCH_SIZE] = batchSize.toString()
+        props[Neo4jConnectorConfig.BATCH_TIMEOUT_MSECS] = 1.toString()
         props[SinkTask.TOPICS_CONFIG] = myTopic
         val input = (1..batchSize).map {
             SinkRecord(myTopic, 1, null, null, null, mapOf("name" to it.toString()), it.toLong())
@@ -1358,7 +1331,7 @@ class Neo4jSinkTaskTest {
         countFooPersonEntities(0)
 
         // test with large timeout
-        props[Neo4jSinkConnectorConfig.BATCH_TIMEOUT_MSECS] = 30000.toString()
+        props[Neo4jConnectorConfig.BATCH_TIMEOUT_MSECS] = 30000.toString()
         val taskValidParallelFalse = Neo4jSinkTask()
         taskValidParallelFalse.initialize(mock(SinkTaskContext::class.java))
         taskValidParallelFalse.start(props)
@@ -1392,12 +1365,6 @@ class Neo4jSinkTaskTest {
             assertEquals(expected, personCount.toInt())
         }
     }
-    
-    private fun cleanAll() {
-        db.defaultDatabaseService().beginTx().use {
-            it.execute("MATCH (n) DETACH DELETE n")
-            it.commit()
-        }
-    }
+
 
 }

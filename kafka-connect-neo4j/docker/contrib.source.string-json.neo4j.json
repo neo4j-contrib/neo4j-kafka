@@ -1,0 +1,17 @@
+{
+  "name": "Neo4jSourceConnectorJSON",
+  "config": {
+    "topic": "my-topic",
+    "connector.class": "streams.kafka.connect.source.Neo4jSourceConnector",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "neo4j.server.uri": "bolt://neo4j:7687",
+    "neo4j.authentication.basic.username": "neo4j",
+    "neo4j.authentication.basic.password": "connect",
+    "neo4j.encryption.enabled": false,
+    "neo4j.streaming.poll.interval.msecs": 5000,
+    "neo4j.streaming.property": "timestamp",
+    "neo4j.streaming.from": "LAST_COMMITTED",
+    "neo4j.source.query": "MATCH (ts:TestSource) WHERE ts.timestamp > $lastCheck RETURN ts.name AS name, ts.timestamp AS timestamp"
+  }
+}
