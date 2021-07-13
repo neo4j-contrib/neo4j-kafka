@@ -6,7 +6,9 @@ Build the project by running the following command:
 
 Inside the directory `<neo4j-streams>/kafka-connect-neo4j/target/component/packages` you'll find a file named `neo4j-kafka-connect-neo4j-<VERSION>.zip`
 
-== Configuring the stack
+== Sink
+
+=== Configuring the stack
 
 Create a directory `plugins` at the same level of the compose file and unzip the file `neo4j-kafka-connect-neo4j-<VERSION>.zip` inside it, then start the compose file
 
@@ -87,7 +89,7 @@ and click to the **Sink** tab. You must find a table just like this:
 |my-topic
 |===
 
-== Use the data generator
+=== Use the data generator
 
 You can download and use the https://github.com/conker84/neo4j-streams-sink-tester/releases/download/1/neo4j-streams-sink-tester-1.0.jar[neo4j-streams-sink-tester-1.0.jar] in order to generate a sample dataset.
 
@@ -130,3 +132,70 @@ Will send data in AVRO format.
 
 For a complete overview of the **Neo4j Steams Sink Tester** please refer to https://github.com/conker84/neo4j-streams-sink-tester[this repo]
 
+== Source
+
+=== Configuring the stack
+
+Create a directory `plugins` at the same level of the compose file and unzip the file `neo4j-kafka-connect-neo4j-<VERSION>.zip` inside it, then start the compose file
+
+    docker-compose up -d
+
+=== Create the Source instance:
+
+In this chapter we'll discuss about how the Source instance works
+
+You can create a new Source instance with this REST call:
+
+[source,shell]
+----
+curl -X POST http://localhost:8083/connectors \
+  -H 'Content-Type:application/json' \
+  -H 'Accept:application/json' \
+  -d @contrib.source.avro.neo4j.json
+----
+
+Let's look at the `contrib.source.avro.neo4j.json` file:
+
+[source,json]
+----
+include::contrib.source.avro.neo4j.json[]
+----
+
+This will create a Kafka Connect Source instance that will send `AVRO` message over the topic named `my-topic`. Every message in the
+topic will have the following structure:
+
+[source,json]
+----
+{"name": <name>, "timestamp": <timestamp>}
+----
+
+**Nb.** Please check the <<kafka-connect-configuration-summary>> for a detailed guide about the supported configuration
+parameters
+
+=== How the Source module pushes the data to the defined Kafka topic
+
+We use the query provided in the `neo4j.source.query` field by polling the database every value is into the
+`neo4j.streaming.poll.interval.msecs` field.
+
+So given the JSON configuration we have that we'll perform:
+
+[source,cypher]
+----
+MATCH (ts:TestSource) WHERE ts.timestamp > $lastCheck RETURN ts.name AS name, ts.timestamp AS timestamp
+----
+
+every 5000 milliseconds by publishing events like:
+
+[source,json]
+----
+{"name":{"string":"John Doe"},"timestamp":{"long":1624551349362}}
+----
+
+In this case we use `neo4j.enforce.schema=true` and this means that we will attach a schema for each record, in case
+you want to stream pure simple JSON strings just use the relative serializer with `neo4j.enforce.schema=false` with the
+following output:
+
+[source,json]
+----
+{"name": "John Doe", "timestamp": 1624549598834}
+----

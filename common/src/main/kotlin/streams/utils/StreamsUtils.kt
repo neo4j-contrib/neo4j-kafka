@@ -62,4 +62,10 @@ object StreamsUtils {
 
     fun getName(db: GraphDatabaseService) = db.databaseName()
 
+    fun closeSafetely(closeable: AutoCloseable, onError: (Throwable) -> Unit) = try {
+        closeable.close()
+    } catch (e: Throwable) {
+        onError(e)
+    }
+
 }
